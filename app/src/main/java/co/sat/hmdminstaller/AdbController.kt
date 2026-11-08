@@ -43,6 +43,15 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
 
     private val manager = AdbManager(context.applicationContext)
 
+    /** Dipakai agar probe dari thread pemantau tidak tumpang tindih dengan operasi di thread kerja. */
+    val probeLock = Any()
+
+    /** Tutup koneksi & lepas resource (dipanggil saat Activity dihancurkan). */
+    fun close() {
+        try { manager.disconnect() } catch (e: Throwable) { }
+        try { manager.close() } catch (e: Throwable) { }
+    }
+
     val isConnected: Boolean
         get() = try { manager.isConnected } catch (e: Throwable) { false }
 
@@ -85,11 +94,18 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         }
     }
 
-    /** Ambil package device owner dari output; null bila tidak ada penanda "device owner". */
+    /** Ambil package device owner dari output; null bila tidak ada penanda device owner. */
     private fun parseOwner(out: String): OwnerState? {
-        val m = Regex("device owner", RegexOption.IGNORE_CASE).find(out) ?: return null
+        // Format bervariasi: "Device Owner:" (dumpsys) atau "...DeviceOwner..." (dpm list-owners).
+        val m = Regex("device\\s*owner", RegexOption.IGNORE_CASE).find(out) ?: return null
+        // Format dpm list-owners: satu baris "User 0: admin=pkg/.Cls,DeviceOwner,..." -> admin ada di baris yang sama (sebelum penanda).
+        val lineStart = out.lastIndexOf('\n', m.range.first) + 1
+        val lineEnd = out.indexOf('\n', m.range.first).let { if (it < 0) out.length else it }
+        val line = out.substring(lineStart, lineEnd)
         val tail = out.substring(m.range.first, minOf(out.length, m.range.first + 400))
-        val pkg = Regex("ComponentInfo\\{([^/}\\s]+)/").find(tail)?.groupValues?.get(1)
+        val pkg = Regex("admin=(?:ComponentInfo\\{)?([\\w.]+)/").find(line)?.groupValues?.get(1)
+            ?: Regex("ComponentInfo\\{([^/}\\s]+)/").find(tail)?.groupValues?.get(1)
+            ?: Regex("admin=(?:ComponentInfo\\{)?([\\w.]+)/").find(tail)?.groupValues?.get(1)
             ?: Regex("package=([\\w.]+)").find(tail)?.groupValues?.get(1)
             ?: return null
         val hmdmPkg = OWNER_COMPONENT.substringBefore('/')

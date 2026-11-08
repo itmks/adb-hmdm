@@ -219,6 +219,7 @@ class MainActivity : AppCompatActivity() {
             log("Log dibersihkan.")
         }
 
+        restorePickedApks()
         refreshApkList()
         refreshHeader()
         log("Isi IP dan Port lalu klik tombol.")
@@ -240,6 +241,9 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         worker.shutdown()
         poller.shutdownNow()
+        val a = adb
+        // Tutup koneksi di thread terpisah agar tidak memblokir UI thread.
+        Thread { a.close() }.apply { isDaemon = true; start() }
     }
 
     // ---------- Status koneksi live ----------
@@ -253,7 +257,10 @@ class MainActivity : AppCompatActivity() {
             // Probe sungguhan tiap ±8 detik (hanya saat tidak ada operasi lain) untuk mendeteksi koneksi mati diam-diam.
             if (alive && !wasBusy && now - lastProbe >= 8_000) {
                 lastProbe = now
-                alive = adb.probe()
+                // Cek busy lagi di dalam lock: worker menunggu lock yang sama sebelum mulai bekerja.
+                synchronized(adb.probeLock) {
+                    if (!busy) alive = adb.probe()
+                }
             }
             runOnUiThread { applyLiveState(alive, wasBusy) }
         } catch (e: Throwable) { }
@@ -323,6 +330,8 @@ class MainActivity : AppCompatActivity() {
         busy = true
         setBusy(true, "Sedang berjalan: $title...")
         worker.execute {
+            // Tunggu probe yang sedang berjalan (bila ada) selesai sebelum memakai koneksi.
+            synchronized(adb.probeLock) { }
             var ok = false
             try { ok = work() } catch (e: Throwable) {
                 runOnUiThread { log("ERROR: ${e.message ?: e.javaClass.simpleName}") }
@@ -438,6 +447,14 @@ class MainActivity : AppCompatActivity() {
             ip = ip.substring(0, i)
         }
         return if (ip.isEmpty() || port.isEmpty()) "" else "$ip:$port"
+    }
+
+    /** Muat ulang APK yang sudah disalin ke cache (mis. setelah proses aplikasi dimatikan sistem). */
+    private fun restorePickedApks() {
+        val dir = File(cacheDir, "picked")
+        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".apk", ignoreCase = true) } ?: return
+        files.sortedBy { it.name.lowercase() }.forEach { apks.add(ApkItem(it.name, it)) }
+        if (files.isNotEmpty()) log("Dipulihkan ${files.size} APK dari sesi sebelumnya.")
     }
 
     private fun copyToCache(uri: Uri): ApkItem? {
