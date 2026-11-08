@@ -289,9 +289,9 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
      * Seluruh proses (openStream + baca) berjalan di thread daemon agar benar-benar bisa ditinggalkan.
      */
     private fun shell(cmd: String, timeoutMs: Long = 15_000): String {
-        @Volatile var stream: io.github.muntashirakon.adb.AdbStream? = null
-        @Volatile var result = ""
-        @Volatile var error: Throwable? = null
+        var stream: io.github.muntashirakon.adb.AdbStream? = null
+        var result = ""
+        var error: Throwable? = null
         val t = Thread {
             try {
                 val s = manager.openStream("shell:$cmd")
