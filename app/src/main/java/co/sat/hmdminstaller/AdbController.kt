@@ -18,6 +18,18 @@ data class ApkItem(val name: String, val file: File, val builtIn: Boolean = fals
         }
 }
 
+/** Status device owner di HP target. */
+sealed class OwnerState {
+    /** Belum terhubung / belum dicek / gagal dicek. */
+    object Unknown : OwnerState()
+    /** Tidak ada device owner. */
+    object None : OwnerState()
+    /** HMDM (com.hmdm.launcher) adalah device owner. */
+    data class Hmdm(val pkg: String) : OwnerState()
+    /** Aplikasi lain yang menjadi device owner. */
+    data class Other(val pkg: String) : OwnerState()
+}
+
 /**
  * Padanan fungsi ADB di versi Windows: pair, connect, disconnect,
  * install -r, dan dpm set-device-owner. Dipanggil dari thread latar.
@@ -54,6 +66,34 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
             watchdog.interrupt()
             try { stream?.close() } catch (e: Throwable) { }
         }
+    }
+
+    /**
+     * Cek siapa device owner di HP target (tanpa menulis log). Dipanggil dari thread latar.
+     * Memakai `dpm list-owners`; bila tidak didukung, fallback ke `dumpsys device_policy`.
+     */
+    fun queryDeviceOwner(): OwnerState {
+        if (!isConnected) return OwnerState.Unknown
+        return try {
+            val a = shell("dpm list-owners")
+            parseOwner(a)?.let { return it }
+            val b = shell("dumpsys device_policy")
+            parseOwner(b)?.let { return it }
+            if (a.isBlank() && b.isBlank()) OwnerState.Unknown else OwnerState.None
+        } catch (e: Throwable) {
+            OwnerState.Unknown
+        }
+    }
+
+    /** Ambil package device owner dari output; null bila tidak ada penanda "device owner". */
+    private fun parseOwner(out: String): OwnerState? {
+        val m = Regex("device owner", RegexOption.IGNORE_CASE).find(out) ?: return null
+        val tail = out.substring(m.range.first, minOf(out.length, m.range.first + 400))
+        val pkg = Regex("ComponentInfo\\{([^/}\\s]+)/").find(tail)?.groupValues?.get(1)
+            ?: Regex("package=([\\w.]+)").find(tail)?.groupValues?.get(1)
+            ?: return null
+        val hmdmPkg = OWNER_COMPONENT.substringBefore('/')
+        return if (pkg == hmdmPkg) OwnerState.Hmdm(pkg) else OwnerState.Other(pkg)
     }
 
     fun pair(addr: String, code: String): Boolean {

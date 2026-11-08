@@ -42,6 +42,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtApkTitle: TextView
     private lateinit var txtApkEmpty: TextView
     private lateinit var statusDot: View
+    private lateinit var ownerDot: View
+    private lateinit var txtOwner: TextView
     private lateinit var progress: ProgressBar
     private lateinit var apkList: LinearLayout
     private lateinit var buttons: List<MaterialButton>
@@ -54,6 +56,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var connectedAddr: String? = null
     private var connectedSince = 0L
     private var lostAddr: String? = null
+    @Volatile private var ownerState: OwnerState = OwnerState.Unknown
 
     // Pemantau status koneksi (live): jalan hanya saat layar terlihat.
     private val poller = Executors.newSingleThreadScheduledExecutor()
@@ -89,6 +92,8 @@ class MainActivity : AppCompatActivity() {
         txtApkTitle = findViewById(R.id.txtApkTitle)
         txtApkEmpty = findViewById(R.id.txtApkEmpty)
         statusDot = findViewById(R.id.statusDot)
+        ownerDot = findViewById(R.id.ownerDot)
+        txtOwner = findViewById(R.id.txtOwner)
         progress = findViewById(R.id.progress)
         apkList = findViewById(R.id.apkList)
 
@@ -111,6 +116,11 @@ class MainActivity : AppCompatActivity() {
         // Log (UI thread) → controller memakai callback ini dari thread kerja.
         adb = AdbController(this) { line -> runOnUiThread { log(line) } }
 
+        findViewById<View>(R.id.ownerPill).setOnClickListener {
+            if (busy) return@setOnClickListener
+            if (!adb.isConnected) { log("Belum terhubung ke device. Connect dulu untuk cek status Device Owner."); return@setOnClickListener }
+            run("Cek Device Owner") { true }
+        }
         btnPair.setOnClickListener {
             val addr = addr(edtPairIp.text.toString(), edtPairPort.text.toString())
             val code = clean(edtPairCode.text.toString())
@@ -258,6 +268,7 @@ class MainActivity : AppCompatActivity() {
             lostAddr = addr
             connectedAddr = null
             connectedSince = 0L
+            ownerState = OwnerState.Unknown
         }
         refreshHeader()
     }
@@ -277,18 +288,26 @@ class MainActivity : AppCompatActivity() {
             connectedSince = System.currentTimeMillis()
             lostAddr = null
             lastProbe = connectedSince
+            updateOwner()
         } else {
             // Connect gagal: koneksi lama sudah diputus, jangan tampilkan alamat lama sebagai terhubung.
             connectedAddr = null
             connectedSince = 0L
+            ownerState = OwnerState.Unknown
         }
         runOnUiThread { refreshHeader() }
         return ok
     }
 
+    /** Cek ulang device owner di HP target (panggil dari thread kerja). */
+    private fun updateOwner() {
+        ownerState = adb.queryDeviceOwner()
+        runOnUiThread { refreshHeader() }
+    }
+
     private fun doDisconnect(): Boolean {
         val ok = adb.disconnect()
-        if (ok) { connectedAddr = null; connectedSince = 0L; lostAddr = null }
+        if (ok) { connectedAddr = null; connectedSince = 0L; lostAddr = null; ownerState = OwnerState.Unknown }
         runOnUiThread { refreshHeader() }
         return ok
     }
@@ -308,6 +327,8 @@ class MainActivity : AppCompatActivity() {
             try { ok = work() } catch (e: Throwable) {
                 runOnUiThread { log("ERROR: ${e.message ?: e.javaClass.simpleName}") }
             }
+            // Perbarui status device owner setelah setiap operasi (install / set owner / dll).
+            try { if (adb.isConnected) ownerState = adb.queryDeviceOwner() } catch (e: Throwable) { }
             runOnUiThread {
                 log(if (ok) "=== SELESAI: BERHASIL ===" else "=== GAGAL / BERHENTI ===")
                 log("")
@@ -347,6 +368,21 @@ class MainActivity : AppCompatActivity() {
                 statusDot.backgroundTintList = ColorStateList.valueOf(Color.rgb(148, 163, 184))
             }
         }
+        refreshOwner()
+    }
+
+    private fun refreshOwner() {
+        val connected = connectedAddr != null && adb.isConnected
+        val st = if (connected) ownerState else OwnerState.Unknown
+        val (text, color) = when (st) {
+            is OwnerState.Hmdm -> "Device Owner: HMDM aktif ✓" to Color.rgb(74, 222, 128)
+            is OwnerState.Other -> "Device Owner: aplikasi lain (${st.pkg})" to Color.rgb(248, 113, 113)
+            OwnerState.None -> "Device Owner: belum diset · Ketuk untuk cek ulang" to Color.rgb(251, 191, 36)
+            OwnerState.Unknown ->
+                (if (connected) "Device Owner: belum diketahui · Ketuk untuk cek" else "Device Owner: — (belum terhubung)") to Color.rgb(148, 163, 184)
+        }
+        txtOwner.text = text
+        ownerDot.backgroundTintList = ColorStateList.valueOf(color)
     }
 
     private fun refreshApkList() {

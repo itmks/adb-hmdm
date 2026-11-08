@@ -97,6 +97,40 @@
                     android:textColor="@color/header_text"
                     android:textSize="13sp" />
             </LinearLayout>
+
+            <!-- Status device owner (ketuk untuk cek ulang) -->
+            <LinearLayout
+                android:id="@+id/ownerPill"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_pill"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="14dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="14dp"
+                android:paddingBottom="10dp">
+
+                <View
+                    android:id="@+id/ownerDot"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/bg_dot" />
+
+                <TextView
+                    android:id="@+id/txtOwner"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:maxLines="2"
+                    android:text="Device Owner: belum diketahui"
+                    android:textColor="@color/header_text"
+                    android:textSize="13sp" />
+            </LinearLayout>
         </LinearLayout>
 
             <LinearLayout
