@@ -48,9 +48,11 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
 
     /** Tutup koneksi & lepas resource (dipanggil saat Activity dihancurkan). */
     fun close() {
-        try { manager.disconnect() } catch (e: Throwable) { }
-        // close() tidak ada di semua versi libadb; panggil via refleksi agar tetap kompatibel.
-        try { manager.javaClass.getMethod("close").invoke(manager) } catch (e: Throwable) { }
+        // close() ada di libadb-android 3.x (AbsAdbConnectionManager implements Closeable).
+        // Panggil langsung; fallback ke disconnect() bila gagal.
+        try { manager.close() } catch (e: Throwable) {
+            try { manager.disconnect() } catch (e2: Throwable) { }
+        }
     }
 
     val isConnected: Boolean
@@ -122,9 +124,9 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         val (host, port) = split(addr) ?: run { log("Alamat pairing tidak valid: $addr"); return false }
         log("> adb pair $addr ******")
         return try {
-            // Ditampung sebagai Any? agar aman baik pair() mengembalikan Boolean maupun void.
-            val result: Any? = manager.pair(host, port, code)
-            if (result == false) {
+            // pair(host, port, code): Boolean di libadb-android 3.x, throw Exception bila gagal.
+            val ok: Boolean = manager.pair(host, port, code)
+            if (!ok) {
                 log("Pairing gagal: ditolak oleh device (cek kode / port pairing).")
                 false
             } else {
@@ -157,8 +159,11 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
             }
             log("> adb connect $addr")
             try {
-                val result: Any? = manager.connect(host, port)
-                if (result == false || !manager.isConnected) {
+                // connect(host, port): Boolean di libadb-android 3.x.
+                // Catatan: connect() return false bila SUDAH ada koneksi lama,
+                // makanya koneksi lama diputus dulu di atas.
+                val result: Boolean = manager.connect(host, port)
+                if (!result || !manager.isConnected) {
                     log("Connect gagal: tidak terhubung")
                 } else if (probe()) {
                     // Terbukti: device menjawab perintah shell, bukan sekadar flag.

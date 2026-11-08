@@ -48,7 +48,8 @@ dependencies {
     implementation("org.bouncycastle:bcutil-jdk15to18:1.81")
 }
 
-// libadb-android sudah membawa BouncyCastle varian jdk15to18; buang varian jdk18on agar tidak duplikat.
+// libadb-android 3.1.1 memakai BC varian jdk15to18 (lihat libadb/build.gradle upstream).
+// Exclude jdk18on hanya sebagai pengaman bila ada transitive dep lain yang menarik varian itu.
 configurations.all {
     exclude(group = "org.bouncycastle", module = "bcprov-jdk18on")
     exclude(group = "org.bouncycastle", module = "bcpkix-jdk18on")

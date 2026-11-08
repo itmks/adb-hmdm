@@ -6,7 +6,9 @@ import io.github.muntashirakon.adb.AbsAdbConnectionManager
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
+import java.security.Security
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.math.BigInteger
@@ -31,6 +33,12 @@ class AdbManager(context: Context) : AbsAdbConnectionManager() {
 
     init {
         setApi(Build.VERSION.SDK_INT)
+        // Pastikan provider BC tersedia (Android 9+ memangkas BC bawaan).
+        try {
+            if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
+                Security.addProvider(BouncyCastleProvider())
+            }
+        } catch (e: Throwable) { }
         var k: PrivateKey? = null
         var c: Certificate? = null
         try {
@@ -51,8 +59,13 @@ class AdbManager(context: Context) : AbsAdbConnectionManager() {
                 name, BigInteger.valueOf(now), Date(now - 24L * 3600 * 1000),
                 Date(now + 20L * 365 * 24 * 3600 * 1000), name, kp.public
             )
-            val signer = JcaContentSignerBuilder("SHA256withRSA").build(kp.private)
-            val x509 = JcaX509CertificateConverter().getCertificate(builder.build(signer))
+            // Paksa pakai provider BC agar tidak kena "SHA256withRSA not available" di HP tertentu.
+            val signer = JcaContentSignerBuilder("SHA256withRSA")
+                .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+                .build(kp.private)
+            val x509 = JcaX509CertificateConverter()
+                .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+                .getCertificate(builder.build(signer))
             keyFile.writeBytes(kp.private.encoded)
             certFile.writeBytes(x509.encoded)
             k = kp.private
