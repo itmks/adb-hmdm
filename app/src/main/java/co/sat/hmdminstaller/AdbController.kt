@@ -227,7 +227,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun setDeviceOwner(): Boolean {
         if (!ensureConnected()) return false
         log("> adb shell dpm set-device-owner $OWNER_COMPONENT")
-        val out = try { shell("dpm set-device-owner $OWNER_COMPONENT") } catch (e: Throwable) {
+        val out = try { shell("dpm set-device-owner $OWNER_COMPONENT", 30_000) } catch (e: Throwable) {
             "Error: ${e.message ?: e.javaClass.simpleName}"
         }
         out.lines().filter { it.isNotBlank() }.forEach { log(it.trim()) }
@@ -242,7 +242,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun clearKasperskyData(): Boolean {
         if (!ensureConnected()) return false
         log("> adb shell pm clear $KASPERSKY_PACKAGE")
-        val out = try { shell("pm clear $KASPERSKY_PACKAGE") } catch (e: Throwable) {
+        val out = try { shell("pm clear $KASPERSKY_PACKAGE", 60_000) } catch (e: Throwable) {
             "Error: ${e.message ?: e.javaClass.simpleName}"
         }
         out.lines().filter { it.isNotBlank() }.forEach { log(it.trim()) }
@@ -258,7 +258,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun uninstallKaspersky(): Boolean {
         if (!ensureConnected()) return false
         log("> adb shell pm uninstall -k --user 0 $KASPERSKY_PACKAGE")
-        val out = try { shell("pm uninstall -k --user 0 $KASPERSKY_PACKAGE") } catch (e: Throwable) {
+        val out = try { shell("pm uninstall -k --user 0 $KASPERSKY_PACKAGE", 120_000) } catch (e: Throwable) {
             "Error: ${e.message ?: e.javaClass.simpleName}"
         }
         out.lines().filter { it.isNotBlank() }.forEach { log(it.trim()) }
@@ -290,7 +290,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
      * (EOF tidak pernah datang), pembacaan menggantung selamanya dan UI terus "Sedang berjalan".
      * Seluruh proses (openStream + baca) berjalan di thread daemon agar benar-benar bisa ditinggalkan.
      */
-    private fun shell(cmd: String, timeoutMs: Long = 15_000, quiet: Boolean = false): String {
+    private fun shell(cmd: String, timeoutMs: Long = 30_000, quiet: Boolean = false): String {
         var stream: io.github.muntashirakon.adb.AdbStream? = null
         var result = ""
         var error: Throwable? = null
@@ -305,9 +305,15 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         }.apply { isDaemon = true; start() }
         t.join(timeoutMs)
         if (t.isAlive) {
-            if (!quiet) log("Peringatan: perintah '$cmd' tidak selesai dalam ${timeoutMs / 1000} detik, dilanjutkan.")
+            // Perintah pm (clear/uninstall) di HP lambat bisa > 15 detik tapi akhirnya Success.
+            // Jangan langsung potong stream; beri grace time tambahan sebelum paksa tutup.
+            if (!quiet) log("Menunggu: perintah '$cmd' masih berjalan setelah ${timeoutMs / 1000} detik...")
+            t.join(30_000)
+        }
+        if (t.isAlive) {
+            if (!quiet) log("Peringatan: perintah '$cmd' tidak selesai, stream diputus paksa.")
             try { stream?.close() } catch (e: Throwable) { }
-            t.join(1_000)
+            t.join(2_000)
         }
         try { stream?.close() } catch (e: Throwable) { }
         error?.let { throw it }
