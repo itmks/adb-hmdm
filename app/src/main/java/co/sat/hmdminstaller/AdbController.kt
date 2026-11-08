@@ -84,9 +84,9 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun queryDeviceOwner(): OwnerState {
         if (!isConnected) return OwnerState.Unknown
         return try {
-            val a = shell("dpm list-owners")
+            val a = shell("dpm list-owners", 8_000)
             parseOwner(a)?.let { return it }
-            val b = shell("dumpsys device_policy")
+            val b = shell("dumpsys device_policy", 8_000)
             parseOwner(b)?.let { return it }
             if (a.isBlank() && b.isBlank()) OwnerState.Unknown else OwnerState.None
         } catch (e: Throwable) {
@@ -283,13 +283,33 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         return false
     }
 
-    private fun shell(cmd: String): String {
-        val stream = manager.openStream("shell:$cmd")
-        try {
-            return readAll(stream.openInputStream())
-        } finally {
-            try { stream.close() } catch (e: Throwable) { }
+    /**
+     * Jalankan `shell:<cmd>` dengan batas waktu. Tanpa ini, bila device tidak menutup stream
+     * (EOF tidak pernah datang), pembacaan menggantung selamanya dan UI terus "Sedang berjalan".
+     * Seluruh proses (openStream + baca) berjalan di thread daemon agar benar-benar bisa ditinggalkan.
+     */
+    private fun shell(cmd: String, timeoutMs: Long = 15_000): String {
+        @Volatile var stream: io.github.muntashirakon.adb.AdbStream? = null
+        @Volatile var result = ""
+        @Volatile var error: Throwable? = null
+        val t = Thread {
+            try {
+                val s = manager.openStream("shell:$cmd")
+                stream = s
+                result = readAll(s.openInputStream())
+            } catch (e: Throwable) {
+                error = e
+            }
+        }.apply { isDaemon = true; start() }
+        t.join(timeoutMs)
+        if (t.isAlive) {
+            log("Peringatan: perintah '$cmd' tidak selesai dalam ${timeoutMs / 1000} detik, dilanjutkan.")
+            try { stream?.close() } catch (e: Throwable) { }
+            t.join(1_000)
         }
+        try { stream?.close() } catch (e: Throwable) { }
+        error?.let { throw it }
+        return result
     }
 
     private fun installTry(file: File): String =
