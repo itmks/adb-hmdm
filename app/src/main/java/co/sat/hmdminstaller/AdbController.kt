@@ -32,7 +32,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     private val manager = AdbManager(context.applicationContext)
 
     val isConnected: Boolean
-        get() = try { manager.isConnected } catch (_: Throwable) { false }
+        get() = try { manager.isConnected } catch (e: Throwable) { false }
 
     /**
      * Cek ringan apakah koneksi benar-benar hidup (bukan sekadar flag): jalankan `echo` di device.
@@ -42,17 +42,17 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         if (!isConnected) return false
         var stream: io.github.muntashirakon.adb.AdbStream? = null
         val watchdog = Thread {
-            try { Thread.sleep(4_000); stream?.close() } catch (_: InterruptedException) { } catch (_: Throwable) { }
+            try { Thread.sleep(4_000); stream?.close() } catch (e: InterruptedException) { } catch (e: Throwable) { }
         }.apply { isDaemon = true; start() }
         return try {
             val s = manager.openStream("shell:echo ok")
             stream = s
             readAll(s.openInputStream()).contains("ok")
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
             false
         } finally {
             watchdog.interrupt()
-            try { stream?.close() } catch (_: Throwable) { }
+            try { stream?.close() } catch (e: Throwable) { }
         }
     }
 
@@ -88,7 +88,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         // connect() di library langsung "sukses" bila masih ada koneksi lama (mis. ke IP/port lain),
         // jadi putuskan dulu agar benar-benar menyambung ke alamat yang diminta.
         if (isConnected) {
-            try { manager.disconnect() } catch (_: Throwable) { }
+            try { manager.disconnect() } catch (e: Throwable) { }
         }
         var ok = false
         for (attempt in 1..2) {
@@ -108,7 +108,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
                     log("connected to $addr")
                 } else {
                     log("Connect gagal: device tidak menjawab (belum di-pair / Wireless debugging mati / port salah)")
-                    try { manager.disconnect() } catch (_: Throwable) { }
+                    try { manager.disconnect() } catch (e: Throwable) { }
                 }
             } catch (e: Throwable) {
                 log("Connect gagal: ${e.message ?: e.javaClass.simpleName}")
@@ -232,7 +232,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         try {
             return readAll(stream.openInputStream())
         } finally {
-            try { stream.close() } catch (_: Throwable) { }
+            try { stream.close() } catch (e: Throwable) { }
         }
     }
 
@@ -248,7 +248,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         val stream = manager.openStream("exec:cmd package install -r -S ${file.length()}")
         // Pengaman: tutup stream bila tidak selesai dalam 5 menit.
         val watchdog = Thread {
-            try { Thread.sleep(300_000); stream.close() } catch (_: InterruptedException) { } catch (_: Throwable) { }
+            try { Thread.sleep(300_000); stream.close() } catch (e: InterruptedException) { } catch (e: Throwable) { }
         }.apply { isDaemon = true; start() }
         try {
             var writeError: java.io.IOException? = null
@@ -274,7 +274,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
             return out
         } finally {
             watchdog.interrupt()
-            try { stream.close() } catch (_: Throwable) { }
+            try { stream.close() } catch (e: Throwable) { }
         }
     }
 
@@ -288,7 +288,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
                 if (n < 0) break
                 bos.write(buf, 0, n)
             }
-        } catch (_: java.io.IOException) {
+        } catch (e: java.io.IOException) {
             // "Stream closed" saat EOF itu normal: device menutup stream setelah perintah selesai.
         }
         return bos.toString("UTF-8")

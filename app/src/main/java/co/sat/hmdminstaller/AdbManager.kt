@@ -40,7 +40,7 @@ class AdbManager(context: Context) : AbsAdbConnectionManager() {
                 c = CertificateFactory.getInstance("X.509")
                     .generateCertificate(ByteArrayInputStream(certFile.readBytes()))
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             k = null; c = null
         }
         if (k == null || c == null) {

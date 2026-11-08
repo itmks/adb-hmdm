@@ -246,7 +246,7 @@ class MainActivity : AppCompatActivity() {
                 alive = adb.probe()
             }
             runOnUiThread { applyLiveState(alive, wasBusy) }
-        } catch (_: Throwable) { }
+        } catch (e: Throwable) { }
     }
 
     private fun applyLiveState(alive: Boolean, polledWhileBusy: Boolean) {
