@@ -1,5 +1,6 @@
 package co.sat.hmdminstaller
 
+import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -102,6 +103,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -141,6 +143,11 @@ class MainActivity : AppCompatActivity() {
 
         // Log (UI thread) → controller memakai callback ini dari thread kerja.
         adb = AdbController(this) { line -> runOnUiThread { log(line) } }
+
+        // Siapkan kunci ADB di thread latar (bukan UI thread).
+        io.execute { adb.warmUp() }
+        // Log punya scroll sendiri di dalam ScrollView halaman: cegah halaman merebut gesture.
+        logScroll.setOnTouchListener { v, _ -> v.parent.requestDisallowInterceptTouchEvent(true); false }
 
         findViewById<View>(R.id.ownerPill).setOnClickListener {
             if (busy) return@setOnClickListener

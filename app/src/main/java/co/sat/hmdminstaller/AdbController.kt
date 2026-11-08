@@ -41,19 +41,30 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         const val KASPERSKY_PACKAGE = "com.kaspersky.kes"
     }
 
-    private val manager = AdbManager(context.applicationContext)
+    private val appContext = context.applicationContext
+    @Volatile private var mgr: AdbManager? = null
+
+    /** Dibuat saat pertama dipakai (pembuatan kunci RSA bisa lambat), aman dipanggil dari banyak thread. */
+    private val manager: AdbManager
+        get() = mgr ?: synchronized(this) { mgr ?: AdbManager(appContext).also { mgr = it } }
+
+    /** Panggil dari thread latar saat aplikasi dibuka agar kunci siap sebelum dipakai. */
+    fun warmUp() {
+        try { manager } catch (e: Throwable) { log("Peringatan: gagal menyiapkan kunci ADB: ${e.message ?: e.javaClass.simpleName}") }
+    }
 
     /** Dipakai agar probe dari thread pemantau tidak tumpang tindih dengan operasi di thread kerja. */
     val probeLock = Any()
 
     /** Tutup koneksi & lepas resource (dipanggil saat Activity dihancurkan). */
     fun close() {
-        try { manager.disconnect() } catch (e: Throwable) { }
-        try { manager.close() } catch (e: Throwable) { }
+        val m = mgr ?: return
+        try { m.disconnect() } catch (e: Throwable) { }
+        try { m.close() } catch (e: Throwable) { }
     }
 
     val isConnected: Boolean
-        get() = try { manager.isConnected } catch (e: Throwable) { false }
+        get() = try { mgr?.isConnected ?: false } catch (e: Throwable) { false }
 
     /**
      * Cek ringan apakah koneksi benar-benar hidup (bukan sekadar flag): jalankan `echo` di device.
@@ -99,18 +110,25 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
 
     /** Ambil package device owner dari output; null bila tidak ada penanda device owner. */
     private fun parseOwner(out: String): OwnerState? {
-        // Format bervariasi: "Device Owner:" (dumpsys) atau "...DeviceOwner..." (dpm list-owners).
-        val m = Regex("device\\s*owner", RegexOption.IGNORE_CASE).find(out) ?: return null
-        // Format dpm list-owners: satu baris "User 0: admin=pkg/.Cls,DeviceOwner,..." -> admin ada di baris yang sama (sebelum penanda).
-        val lineStart = out.lastIndexOf('\n', m.range.first) + 1
-        val lineEnd = out.indexOf('\n', m.range.first).let { if (it < 0) out.length else it }
-        val line = out.substring(lineStart, lineEnd)
-        val tail = out.substring(m.range.first, minOf(out.length, m.range.first + 400))
-        val pkg = Regex("admin=(?:ComponentInfo\\{)?([\\w.]+)/").find(line)?.groupValues?.get(1)
-            ?: Regex("ComponentInfo\\{([^/}\\s]+)/").find(tail)?.groupValues?.get(1)
-            ?: Regex("admin=(?:ComponentInfo\\{)?([\\w.]+)/").find(tail)?.groupValues?.get(1)
-            ?: Regex("package=([\\w.]+)").find(tail)?.groupValues?.get(1)
-            ?: return null
+        val adminRe = Regex("admin=(?:ComponentInfo\\{)?([\\w.]+)/")
+        val markerRe = Regex("device\\s*owner", RegexOption.IGNORE_CASE)
+        // 1) `dpm list-owners`: satu baris berisi admin=pkg/.Cls dan penanda DeviceOwner.
+        var pkg: String? = null
+        for (line in out.lineSequence()) {
+            if (markerRe.containsMatchIn(line)) {
+                pkg = adminRe.find(line)?.groupValues?.get(1)
+                if (pkg != null) break
+            }
+        }
+        // 2) `dumpsys device_policy`: header "Device Owner:" lalu detail di baris-baris berikutnya.
+        if (pkg == null) {
+            val m = Regex("device\\s+owner\\s*:", RegexOption.IGNORE_CASE).find(out) ?: return null
+            val tail = out.substring(m.range.first, minOf(out.length, m.range.first + 400))
+            pkg = Regex("ComponentInfo\\{([^/}\\s]+)/").find(tail)?.groupValues?.get(1)
+                ?: adminRe.find(tail)?.groupValues?.get(1)
+                ?: Regex("package=([\\w.]+)").find(tail)?.groupValues?.get(1)
+                ?: return null
+        }
         val hmdmPkg = OWNER_COMPONENT.substringBefore('/')
         return if (pkg == hmdmPkg) OwnerState.Hmdm(pkg) else OwnerState.Other(pkg)
     }
