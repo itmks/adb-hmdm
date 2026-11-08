@@ -84,9 +84,12 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun queryDeviceOwner(): OwnerState {
         if (!isConnected) return OwnerState.Unknown
         return try {
-            val a = shell("dpm list-owners", 8_000)
+            // Quiet: ini cek latar belakang, jangan memenuhi log dengan peringatan timeout.
+            val a = shell("dpm list-owners", 5_000, quiet = true)
             parseOwner(a)?.let { return it }
-            val b = shell("dumpsys device_policy", 8_000)
+            // Bila dpm menggantung (device_policy sibuk), dumpsys hampir pasti ikut menggantung: jangan tunggu lagi.
+            if (lastShellTimedOut && a.isBlank()) return OwnerState.Unknown
+            val b = shell("dumpsys device_policy", 6_000, quiet = true)
             parseOwner(b)?.let { return it }
             if (a.isBlank() && b.isBlank()) OwnerState.Unknown else OwnerState.None
         } catch (e: Throwable) {
@@ -225,7 +228,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun setDeviceOwner(): Boolean {
         if (!ensureConnected()) return false
         log("> adb shell dpm set-device-owner $OWNER_COMPONENT")
-        val out = try { shell("dpm set-device-owner $OWNER_COMPONENT") } catch (e: Throwable) {
+        val out = try { shell("dpm set-device-owner $OWNER_COMPONENT", doneWhen = { it.contains("Success") }) } catch (e: Throwable) {
             "Error: ${e.message ?: e.javaClass.simpleName}"
         }
         out.lines().filter { it.isNotBlank() }.forEach { log(it.trim()) }
@@ -240,7 +243,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun clearKasperskyData(): Boolean {
         if (!ensureConnected()) return false
         log("> adb shell pm clear $KASPERSKY_PACKAGE")
-        val out = try { shell("pm clear $KASPERSKY_PACKAGE") } catch (e: Throwable) {
+        val out = try { shell("pm clear $KASPERSKY_PACKAGE", doneWhen = pmDone) } catch (e: Throwable) {
             "Error: ${e.message ?: e.javaClass.simpleName}"
         }
         out.lines().filter { it.isNotBlank() }.forEach { log(it.trim()) }
@@ -256,7 +259,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun uninstallKaspersky(): Boolean {
         if (!ensureConnected()) return false
         log("> adb shell pm uninstall -k --user 0 $KASPERSKY_PACKAGE")
-        val out = try { shell("pm uninstall -k --user 0 $KASPERSKY_PACKAGE") } catch (e: Throwable) {
+        val out = try { shell("pm uninstall -k --user 0 $KASPERSKY_PACKAGE", doneWhen = pmDone) } catch (e: Throwable) {
             "Error: ${e.message ?: e.javaClass.simpleName}"
         }
         out.lines().filter { it.isNotBlank() }.forEach { log(it.trim()) }
@@ -283,33 +286,63 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         return false
     }
 
+    /** Hasil `pm` dianggap lengkap setelah satu baris Success / Failure / Error selesai dibaca. */
+    private val pmDone: (String) -> Boolean = { out ->
+        out.endsWith("\n") && (out.contains("Success") || out.contains("Failure") || out.contains("Error"))
+    }
+
+    @Volatile private var lastShellTimedOut = false
+
     /**
-     * Jalankan `shell:<cmd>` dengan batas waktu. Tanpa ini, bila device tidak menutup stream
-     * (EOF tidak pernah datang), pembacaan menggantung selamanya dan UI terus "Sedang berjalan".
-     * Seluruh proses (openStream + baca) berjalan di thread daemon agar benar-benar bisa ditinggalkan.
+     * Jalankan `shell:<cmd>` dengan batas waktu. Output dikumpulkan bertahap; bila [doneWhen]
+     * terpenuhi, pembacaan dihentikan tanpa menunggu EOF (device kadang tidak segera menutup
+     * stream walau perintah sudah selesai dan "Success" sudah tercetak).
+     * Peringatan timeout hanya dicatat bila memang belum ada output sama sekali.
      */
-    private fun shell(cmd: String, timeoutMs: Long = 15_000): String {
+    private fun shell(
+        cmd: String,
+        timeoutMs: Long = 15_000,
+        quiet: Boolean = false,
+        doneWhen: ((String) -> Boolean)? = null
+    ): String {
+        val bos = ByteArrayOutputStream()
+        val done = java.util.concurrent.CountDownLatch(1)
         var stream: io.github.muntashirakon.adb.AdbStream? = null
-        var result = ""
         var error: Throwable? = null
-        val t = Thread {
+        Thread {
             try {
                 val s = manager.openStream("shell:$cmd")
                 stream = s
-                result = readAll(s.openInputStream())
+                val input = s.openInputStream()
+                val buf = ByteArray(4096)
+                try {
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        bos.write(buf, 0, n)
+                        if (doneWhen != null && doneWhen(bos.toString("UTF-8"))) break
+                    }
+                } catch (e: java.io.IOException) {
+                    // Stream ditutup device = akhir output yang normal.
+                }
             } catch (e: Throwable) {
                 error = e
+            } finally {
+                done.countDown()
             }
         }.apply { isDaemon = true; start() }
-        t.join(timeoutMs)
-        if (t.isAlive) {
-            log("Peringatan: perintah '$cmd' tidak selesai dalam ${timeoutMs / 1000} detik, dilanjutkan.")
-            try { stream?.close() } catch (e: Throwable) { }
-            t.join(1_000)
-        }
+
+        val finished = done.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        lastShellTimedOut = !finished
         try { stream?.close() } catch (e: Throwable) { }
+        if (!finished) {
+            done.await(1, java.util.concurrent.TimeUnit.SECONDS)
+            if (!quiet && bos.size() == 0) {
+                log("Peringatan: perintah '$cmd' tidak selesai dalam ${timeoutMs / 1000} detik, dilanjutkan.")
+            }
+        }
         error?.let { throw it }
-        return result
+        return bos.toString("UTF-8")
     }
 
     private fun installTry(file: File): String =

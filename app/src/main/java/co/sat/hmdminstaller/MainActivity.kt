@@ -337,7 +337,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { log("ERROR: ${e.message ?: e.javaClass.simpleName}") }
             }
             // Perbarui status device owner setelah setiap operasi (install / set owner / dll).
-            try { if (adb.isConnected) ownerState = adb.queryDeviceOwner() } catch (e: Throwable) { }
+            try { if (adb.isConnected) { val st = adb.queryDeviceOwner(); if (st != OwnerState.Unknown) ownerState = st } } catch (e: Throwable) { }
             runOnUiThread {
                 log(if (ok) "=== SELESAI: BERHASIL ===" else "=== GAGAL / BERHENTI ===")
                 log("")
