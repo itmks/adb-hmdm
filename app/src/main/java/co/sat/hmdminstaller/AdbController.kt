@@ -49,7 +49,8 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     /** Tutup koneksi & lepas resource (dipanggil saat Activity dihancurkan). */
     fun close() {
         try { manager.disconnect() } catch (e: Throwable) { }
-        try { manager.close() } catch (e: Throwable) { }
+        // close() tidak ada di semua versi libadb; panggil via refleksi agar tetap kompatibel.
+        try { manager.javaClass.getMethod("close").invoke(manager) } catch (e: Throwable) { }
     }
 
     val isConnected: Boolean
@@ -84,9 +85,10 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
     fun queryDeviceOwner(): OwnerState {
         if (!isConnected) return OwnerState.Unknown
         return try {
-            val a = shell("dpm list-owners", 8_000)
+            // dpm cepat; dumpsys bisa besar/lambat via WiFi, jadi timeout lebih longgar & tanpa warning.
+            val a = shell("dpm list-owners", 10_000, quiet = true)
             parseOwner(a)?.let { return it }
-            val b = shell("dumpsys device_policy", 8_000)
+            val b = shell("dumpsys device_policy", 20_000, quiet = true)
             parseOwner(b)?.let { return it }
             if (a.isBlank() && b.isBlank()) OwnerState.Unknown else OwnerState.None
         } catch (e: Throwable) {
@@ -288,7 +290,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
      * (EOF tidak pernah datang), pembacaan menggantung selamanya dan UI terus "Sedang berjalan".
      * Seluruh proses (openStream + baca) berjalan di thread daemon agar benar-benar bisa ditinggalkan.
      */
-    private fun shell(cmd: String, timeoutMs: Long = 15_000): String {
+    private fun shell(cmd: String, timeoutMs: Long = 15_000, quiet: Boolean = false): String {
         var stream: io.github.muntashirakon.adb.AdbStream? = null
         var result = ""
         var error: Throwable? = null
@@ -303,7 +305,7 @@ class AdbController(context: Context, private val log: (String) -> Unit) {
         }.apply { isDaemon = true; start() }
         t.join(timeoutMs)
         if (t.isAlive) {
-            log("Peringatan: perintah '$cmd' tidak selesai dalam ${timeoutMs / 1000} detik, dilanjutkan.")
+            if (!quiet) log("Peringatan: perintah '$cmd' tidak selesai dalam ${timeoutMs / 1000} detik, dilanjutkan.")
             try { stream?.close() } catch (e: Throwable) { }
             t.join(1_000)
         }

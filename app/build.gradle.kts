@@ -42,8 +42,10 @@ dependencies {
     // ADB client untuk Android (Wireless debugging: pair + connect)
     implementation("com.github.MuntashirAkon:libadb-android:3.1.1")
     implementation("org.conscrypt:conscrypt-android:2.5.3")
-    // Pembuatan sertifikat self-signed untuk kunci ADB
+    // Pembuatan sertifikat self-signed untuk kunci ADB (paket jdk15to18, konsisten dengan libadb)
+    implementation("org.bouncycastle:bcprov-jdk15to18:1.81")
     implementation("org.bouncycastle:bcpkix-jdk15to18:1.81")
+    implementation("org.bouncycastle:bcutil-jdk15to18:1.81")
 }
 
 // libadb-android sudah membawa BouncyCastle varian jdk15to18; buang varian jdk18on agar tidak duplikat.

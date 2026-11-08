@@ -201,7 +201,7 @@
                                 android:layout_height="wrap_content"
                                 android:fontFamily="monospace"
                                 android:digits="0123456789.:"
-                                android:inputType="number"
+                                android:inputType="textUri"
                                 android:minHeight="0dp"
                                 android:paddingTop="9dp"
                                 android:paddingBottom="9dp"
@@ -221,6 +221,7 @@
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:fontFamily="monospace"
+                                android:digits="0123456789"
                                 android:inputType="number"
                                 android:minHeight="0dp"
                                 android:paddingTop="9dp"
@@ -333,7 +334,7 @@
                                 android:layout_height="wrap_content"
                                 android:fontFamily="monospace"
                                 android:digits="0123456789.:"
-                                android:inputType="number"
+                                android:inputType="textUri"
                                 android:minHeight="0dp"
                                 android:paddingTop="9dp"
                                 android:paddingBottom="9dp"
@@ -353,6 +354,7 @@
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:fontFamily="monospace"
+                                android:digits="0123456789"
                                 android:inputType="number"
                                 android:minHeight="0dp"
                                 android:paddingTop="9dp"
@@ -539,9 +541,9 @@
                             android:layout_weight="1"
                             android:text="Install Semua APK" 
                             android:minHeight="0dp"
-                            android:autoSizeMaxTextSize="13sp"
-                            android:autoSizeMinTextSize="9sp"
-                            android:autoSizeTextType="uniform"
+                            app:autoSizeMaxTextSize="13sp"
+                            app:autoSizeMinTextSize="9sp"
+                            app:autoSizeTextType="uniform"
                             android:maxLines="1" />
 
                         <com.google.android.material.button.MaterialButton
@@ -552,9 +554,9 @@
                             android:layout_weight="1"
                             android:text="Set Device Owner" 
                             android:minHeight="0dp"
-                            android:autoSizeMaxTextSize="13sp"
-                            android:autoSizeMinTextSize="9sp"
-                            android:autoSizeTextType="uniform"
+                            app:autoSizeMaxTextSize="13sp"
+                            app:autoSizeMinTextSize="9sp"
+                            app:autoSizeTextType="uniform"
                             android:maxLines="1" />
                     </LinearLayout>
 
@@ -673,7 +675,7 @@
                 android:layout_marginTop="18dp"
                 android:layout_marginBottom="8dp"
                 android:gravity="center"
-                android:text="© 2026 PT. Sumber Alfaria Trijaya, Tbk - IT RZ01 Department · Version 3.0"
+                android:text="© 2026 PT. Sumber Alfaria Trijaya, Tbk - IT RZ01 Department · Version 4.0"
                 android:textColor="@color/muted"
                 android:textSize="11sp" />
             </LinearLayout>

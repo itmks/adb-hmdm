@@ -17,7 +17,12 @@
 
     <color name="side">#08181D</color>
     <color name="header_end">#0B5A54</color>
+    <color name="header_text">#FFFFFF</color>
+    <color name="header_subtext">#B7E4DE</color>
 
     <color name="log_bg">#070B10</color>
     <color name="log_stroke">#1A2430</color>
+    <color name="log_text">#CBD5E1</color>
+
+    <color name="ic_bg">#08181D</color>
 </resources>
