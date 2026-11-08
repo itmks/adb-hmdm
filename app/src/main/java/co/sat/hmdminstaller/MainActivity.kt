@@ -49,6 +49,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var buttons: List<MaterialButton>
 
     private val worker = Executors.newSingleThreadExecutor()
+    // Penyalinan APK ke cache dipisah dari worker ADB agar tidak antre di belakang install, dan tidak membebani UI thread.
+    private val io = Executors.newSingleThreadExecutor()
     private val apks = mutableListOf<ApkItem>()
     private val checked = mutableSetOf<ApkItem>()
     private lateinit var adb: AdbController
@@ -65,15 +67,39 @@ class MainActivity : AppCompatActivity() {
 
     private val pickApks = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNullOrEmpty()) return@registerForActivityResult
-        var added = 0
+        // Di UI thread: hanya baca nama (cepat) dan saring duplikat / non-APK.
+        val seen = apks.map { it.name.lowercase() }.toMutableSet()
+        val todo = mutableListOf<Pair<Uri, String>>()
         var skipped = 0
         uris.forEach { uri ->
-            val item = copyToCache(uri)
-            if (item == null) skipped++ else { apks.add(item); added++ }
+            val name = displayName(uri)
+            when {
+                !name.endsWith(".apk", ignoreCase = true) -> skipped++
+                !seen.add(name.lowercase()) -> {
+                    log("APK sudah ada di daftar, tidak ditambahkan lagi: $name")
+                    skipped++
+                }
+                else -> todo.add(uri to name)
+            }
         }
-        if (added > 0) log("Ditambahkan $added APK. Total: ${apks.size}")
-        if (skipped > 0) log("$skipped file dilewati (bukan .apk / gagal dibaca).")
-        refreshApkList()
+        if (skipped > 0) log("$skipped file dilewati (bukan .apk / duplikat).")
+        if (todo.isEmpty()) return@registerForActivityResult
+        log("Menyalin ${todo.size} APK...")
+        // Penyalinan file (bisa puluhan-ratusan MB) di thread latar.
+        io.execute {
+            val items = mutableListOf<ApkItem>()
+            var failed = 0
+            todo.forEach { (uri, name) ->
+                val item = copyToCache(uri, name)
+                if (item == null) failed++ else items.add(item)
+            }
+            runOnUiThread {
+                apks.addAll(items)
+                if (items.isNotEmpty()) log("Ditambahkan ${items.size} APK. Total: ${apks.size}")
+                if (failed > 0) log("Gagal menyalin $failed file.")
+                refreshApkList()
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -240,6 +266,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         worker.shutdown()
+        io.shutdown()
         poller.shutdownNow()
         val a = adb
         // Tutup koneksi di thread terpisah agar tidak memblokir UI thread.
@@ -457,23 +484,28 @@ class MainActivity : AppCompatActivity() {
         if (files.isNotEmpty()) log("Dipulihkan ${files.size} APK dari sesi sebelumnya.")
     }
 
-    private fun copyToCache(uri: Uri): ApkItem? {
+    private fun displayName(uri: Uri): String {
         var name = "file-${System.currentTimeMillis()}.apk"
-        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0)?.let { name = it }
-        }
-        if (!name.endsWith(".apk", ignoreCase = true)) return null
-        if (apks.any { it.name.equals(name, ignoreCase = true) }) {
-            log("APK sudah ada di daftar, tidak ditambahkan lagi: $name")
-            return null
-        }
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0)?.let { name = it }
+            }
+        } catch (e: Exception) { }
+        // Cegah path traversal dari nama file yang aneh.
+        return name.substringAfterLast('/')
+    }
+
+    /** Salin ke cache. Dipanggil dari thread latar (bukan UI thread). */
+    private fun copyToCache(uri: Uri, name: String): ApkItem? {
+        val dir = File(cacheDir, "picked").apply { mkdirs() }
+        val f = File(dir, name)
         return try {
-            val dir = File(cacheDir, "picked").apply { mkdirs() }
-            val f = File(dir, name)
-            contentResolver.openInputStream(uri)!!.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+            val input = contentResolver.openInputStream(uri) ?: throw java.io.IOException("tidak bisa membuka file")
+            input.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
             ApkItem(name, f)
         } catch (e: Exception) {
-            log("Gagal membaca $name: ${e.message}")
+            f.delete() // jangan tinggalkan file setengah jadi
+            runOnUiThread { log("Gagal membaca $name: ${e.message}") }
             null
         }
     }
