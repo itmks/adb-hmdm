@@ -45,6 +45,24 @@ class PinLockView(
     private val btnLogin = MaterialButton(context)
     private var showPin = false
 
+    // ---- Terkunci sementara karena terlalu banyak salah ----
+    // Harus dideklarasikan sebelum blok init, karena init memanggil startLockTicker().
+    private val ticker = object : Runnable {
+        override fun run() {
+            val left = store.lockRemainingMs()
+            if (left > 0) {
+                setInputEnabled(false)
+                val s = (left + 999) / 1000
+                showMessage("Terlalu banyak percobaan salah. Coba lagi dalam %d:%02d".format(s / 60, s % 60))
+                handler.postDelayed(this, 500)
+            } else if (!input.isEnabled) {
+                setInputEnabled(true)
+                hideMessage()
+                focusInput()
+            }
+        }
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun color(id: Int) = ContextCompat.getColor(context, id)
 
@@ -233,23 +251,6 @@ class PinLockView(
                 boxRow.animate().translationX(0f).setDuration(50).start()
             }.start()
         }.start()
-    }
-
-    // ---- Terkunci sementara karena terlalu banyak salah ----
-    private val ticker = object : Runnable {
-        override fun run() {
-            val left = store.lockRemainingMs()
-            if (left > 0) {
-                setInputEnabled(false)
-                val s = (left + 999) / 1000
-                showMessage("Terlalu banyak percobaan salah. Coba lagi dalam %d:%02d".format(s / 60, s % 60))
-                handler.postDelayed(this, 500)
-            } else if (!input.isEnabled) {
-                setInputEnabled(true)
-                hideMessage()
-                focusInput()
-            }
-        }
     }
 
     private fun startLockTicker() { handler.removeCallbacks(ticker); handler.post(ticker) }
