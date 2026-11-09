@@ -13,6 +13,7 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.os.SystemClock
+import androidx.core.content.ContextCompat
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.OnBackPressedCallback
@@ -75,7 +76,8 @@ class MainActivity : AppCompatActivity() {
     // ---- Kunci PIN ----
     private lateinit var pinStore: PinStore
     private var lockView: PinLockView? = null
-    private var lastStopAt = 0L
+    private var lastActivityAt = SystemClock.elapsedRealtime()
+    private lateinit var txtSession: TextView
     private val backWhileLocked = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() { moveTaskToBack(true) }
     }
@@ -273,6 +275,8 @@ class MainActivity : AppCompatActivity() {
         pinStore = PinStore(this)
         if (!pinStore.isSet) pinStore.set(PinStore.DEFAULT_PIN)
         onBackPressedDispatcher.addCallback(this, backWhileLocked)
+        txtSession = findViewById(R.id.txtSession)
+        findViewById<View>(R.id.btnLogout).setOnClickListener { showLock() }
         showLock()
 
         restorePickedApks()
@@ -284,17 +288,13 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         // Kunci ulang bila aplikasi ditinggalkan lebih lama dari batas waktu (koneksi ADB tetap berjalan).
-        if (lockView == null && lastStopAt != 0L && pinStore.isSet &&
-            SystemClock.elapsedRealtime() - lastStopAt > LOCK_TIMEOUT_MS) {
-            showLock()
-        }
+        if (lockView == null && !busy && sessionRemainingMs() <= 0) showLock()
         pollTask?.cancel(false)
         pollTask = poller.scheduleWithFixedDelay({ pollConnection() }, 0, 1, TimeUnit.SECONDS)
     }
 
     override fun onStop() {
         super.onStop()
-        lastStopAt = SystemClock.elapsedRealtime()
         pollTask?.cancel(false)
         pollTask = null
     }
@@ -320,10 +320,32 @@ class MainActivity : AppCompatActivity() {
         currentFocus?.clearFocus()
     }
 
+    /** Sisa waktu sesi (ms) sebelum aplikasi terkunci otomatis. Hitung mundur diulang tiap ada sentuhan. */
+    private fun sessionRemainingMs() = LOCK_TIMEOUT_MS - (SystemClock.elapsedRealtime() - lastActivityAt)
+
+    /** Dipanggil tiap detik dari pemantau. Saat operasi (install dll) berjalan, timer ditahan penuh. */
+    private fun updateSessionTimer() {
+        if (lockView != null) return
+        if (busy) lastActivityAt = SystemClock.elapsedRealtime()
+        val left = sessionRemainingMs()
+        if (left <= 0) { showLock(); return }
+        val sec = (left + 999) / 1000
+        txtSession.text = if (sec >= 3600) "Sesi %d:%02d:%02d".format(sec / 3600, sec % 3600 / 60, sec % 60)
+                          else "Sesi %02d:%02d".format(sec / 60, sec % 60)
+        txtSession.setTextColor(if (sec <= 60) Color.rgb(251, 191, 36) else ContextCompat.getColor(this, R.color.header_subtext))
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (lockView == null) lastActivityAt = SystemClock.elapsedRealtime()
+        return super.dispatchTouchEvent(ev)
+    }
+
     private fun removeLock() {
         lockView?.let { (it.parent as? ViewGroup)?.removeView(it) }
         lockView = null
         backWhileLocked.isEnabled = false
+        lastActivityAt = SystemClock.elapsedRealtime()
+        updateSessionTimer()
     }
 
     // ---------- Status koneksi live ----------
@@ -348,6 +370,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyLiveState(alive: Boolean, polledWhileBusy: Boolean) {
         if (isFinishing) return
+        updateSessionTimer()
         val addr = connectedAddr
         // Saat operasi berjalan (mis. connect/install) jangan simpulkan putus: hasilnya bisa basi.
         if (addr != null && !alive && !polledWhileBusy && !busy) {
